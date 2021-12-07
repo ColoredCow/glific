@@ -495,10 +495,12 @@ defmodule Glific.Clients.Stir do
   }
 
   @reminders %{
-    pending_registeration: %{days: 7, group: "pending_registration"},
-    inactive_after_registeration: %{days: 15, group: "inactive_after_registeration"},
-    submit_refecltion: %{days: 30, group: "submit_refecltion"}
+    pending_registration: %{days: 7, group: "pending_registration"},
+    inactive_after_registration: %{days: 15, group: "inactive_after_registration"},
+    submit_reflection: %{days: 30, group: "submit_reflection"}
   }
+
+  @active_report_days [1, 2, 3, 4, 5, 6]
 
   @doc false
   @spec webhook(String.t(), map()) :: map()
@@ -834,6 +836,12 @@ defmodule Glific.Clients.Stir do
   def webhook("compute_survey_score", %{results: results}),
     do: compute_survey_score(results)
 
+  def webhook("monthly_reports", _fields) do
+    today = Timex.today("Asia/Kolkata")
+    response = if today.day in @active_report_days, do: "available", else: "not available"
+    %{response: response}
+  end
+
   def webhook(_, fields), do: fields
 
   @doc """
@@ -914,6 +922,7 @@ defmodule Glific.Clients.Stir do
 
     priority_item = %{
       "priority" => priority,
+      "diet_activity" => fields["contact"]["fields"]["activity"]["value"],
       "answers" => %{
         s1: answer_s1,
         s2: answer_s2,
@@ -1188,16 +1197,16 @@ defmodule Glific.Clients.Stir do
 
   @spec set_contact_reminder(Contacts.Contact.t(), map()) :: map()
   defp set_contact_reminder(contact, _fields) do
-    with {:remnder_not_set, attrs} <-
-           pending_registeration_reminder(%{reminder_set: false}, contact, :pending_registeration),
-         {:remnder_not_set, attrs} <-
-           being_inactive_after_registeration_reminder(
+    with {:reminder_not_set, attrs} <-
+           pending_registration_reminder(%{reminder_set: false}, contact, :pending_registration),
+         {:reminder_not_set, attrs} <-
+           being_inactive_after_registration_reminder(
              attrs,
              contact,
-             :inactive_after_registeration
+             :inactive_after_registration
            ),
-         {:remnder_not_set, attrs} <-
-           submit_refecltion_reminder(attrs, contact, :submit_refecltion) do
+         {:reminder_not_set, attrs} <-
+           submit_reflection_reminder(attrs, contact, :submit_reflection) do
       attrs
     else
       {_, attrs} -> attrs
@@ -1205,47 +1214,47 @@ defmodule Glific.Clients.Stir do
     end
   end
 
-  @spec pending_registeration_reminder(map(), Contacts.Contact.t(), atom()) :: tuple()
-  defp pending_registeration_reminder(results, contact, type) do
+  @spec pending_registration_reminder(map(), Contacts.Contact.t(), atom()) :: tuple()
+  defp pending_registration_reminder(results, contact, type) do
     with {:error, _} <- has_a_date(contact.fields, "registration_completed_at"),
          {:ok, registration_started_at} <- has_a_date(contact.fields, "registration_started_at"),
          true <-
            Timex.diff(Timex.today(), registration_started_at, :days) |> is_reminder_day?(type) do
-      {:remnder_set, set_reminder(contact, type)}
+      {:reminder_set, set_reminder(contact, type)}
     else
-      _ -> {:remnder_not_set, results}
+      _ -> {:reminder_not_set, results}
     end
   end
 
-  @spec being_inactive_after_registeration_reminder(map(), Contacts.Contact.t(), atom()) ::
+  @spec being_inactive_after_registration_reminder(map(), Contacts.Contact.t(), atom()) ::
           tuple()
-  defp being_inactive_after_registeration_reminder(results, contact, type) do
+  defp being_inactive_after_registration_reminder(results, contact, type) do
     with {:ok, _registration_completed_at} <-
            has_a_date(contact.fields, "registration_completed_at"),
          true <-
            Timex.diff(Timex.today(), contact.last_message_at, :days)
            |> is_reminder_day?(type) do
-      {:remnder_set, set_reminder(contact, type)}
+      {:reminder_set, set_reminder(contact, type)}
     else
-      _ -> {:remnder_not_set, results}
+      _ -> {:reminder_not_set, results}
     end
   end
 
-  @spec submit_refecltion_reminder(map(), Contacts.Contact.t(), atom()) :: tuple()
-  defp submit_refecltion_reminder(results, contact, type) do
+  @spec submit_reflection_reminder(map(), Contacts.Contact.t(), atom()) :: tuple()
+  defp submit_reflection_reminder(results, contact, type) do
     case has_a_date(contact.fields, "registration_completed_at") do
       {:ok, _registration_completed_at} ->
         has_a_date(contact.fields, "last_survey_submission_at")
         date = submission_check_date(contact.fields)
 
         if Timex.diff(Timex.today(), date, :days) |> is_reminder_day?(type) do
-          {:remnder_set, set_reminder(contact, type)}
+          {:reminder_set, set_reminder(contact, type)}
         else
-          {:remnder_not_set, results}
+          {:reminder_not_set, results}
         end
 
       _ ->
-        {:remnder_not_set, results}
+        {:reminder_not_set, results}
     end
   end
 
@@ -1300,6 +1309,7 @@ defmodule Glific.Clients.Stir do
 
   defp parse_string_to_date(date) when is_binary(date) == true do
     date
+    |> String.trim()
     |> Timex.parse!("{YYYY}-{0M}-{D}")
     |> Timex.to_date()
   end
